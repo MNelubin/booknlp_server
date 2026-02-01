@@ -33,7 +33,7 @@ nano .env
 ### 2. Запуск
 
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
 
 ### 3. Проверка
@@ -80,16 +80,16 @@ curl http://localhost:8888/health
 
 ```bash
 # Логи
-docker-compose logs -f
+docker compose logs -f
 
 # Перезапуск
-docker-compose restart
+docker compose restart
 
 # Остановка
-docker-compose down
+docker compose down
 
 # Обновление
-docker-compose up -d --build
+docker compose up -d --build
 ```
 
 ## 📂 Монтирование моделей

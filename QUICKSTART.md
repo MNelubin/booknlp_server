@@ -36,10 +36,10 @@ mkdir -p data temp
 
 ```bash
 # Соберите и запустите
-docker-compose up -d
+docker compose up -d
 
 # Следите за логами
-docker-compose logs -f
+docker compose logs -f
 
 # Дождитесь сообщения: "Application startup complete"
 ```
