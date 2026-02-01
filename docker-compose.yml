@@ -1,0 +1,65 @@
+version: '3.8'
+
+services:
+  booknlp-gpu:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: booknlp-gpu:latest
+    container_name: booknlp-gpu-service
+    restart: unless-stopped
+
+    environment:
+      # GPU configuration
+      - NVIDIA_VISIBLE_DEVICES=all
+      - CUDA_VISIBLE_DEVICES=${GPU_DEVICE:-0}
+      - BOOKNLP_MODEL=${BOOKNLP_MODEL:-big}
+
+      # Model and data paths (inside container)
+      - BOOKNLP_MODELS_DIR=/models
+      - BOOKNLP_DATA_DIR=/data
+
+      # API settings
+      - API_HOST=${API_HOST:-0.0.0.0}
+      - API_PORT=${API_PORT:-8888}
+      - WORKERS=${WORKERS:-1}
+
+    volumes:
+      # Mount models directory from host
+      # You can specify any path on your host via MODELS_PATH in .env
+      - ${MODELS_PATH:-./models}:/models
+
+      # Mount data directory for input/output files
+      - ${DATA_PATH:-./data}:/data
+
+      # Mount temp directory for temporary files
+      - ${TEMP_PATH:-./temp}:/tmp/booknlp
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+    ports:
+      - "${API_PORT:-8888}:8888"
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8888/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+    # Logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  default:
+    name: booknlp-network

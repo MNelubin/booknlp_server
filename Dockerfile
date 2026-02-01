@@ -1,0 +1,43 @@
+FROM nvidia/cuda:12.1.0-runtime-ubuntu22.04
+
+# Install system dependencies
+RUN apt-get update -qq && apt-get install -y -qq \
+    python3.11 \
+    python3.11-venv \
+    python3-pip \
+    git \
+    curl \
+    wget \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+# Set Python environment
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app
+
+WORKDIR /app
+
+# Copy server code
+COPY booknlp_server.py /app/
+COPY requirements.txt /app/
+
+# Install Python dependencies
+RUN pip3 install --no-cache-dir --upgrade pip && \
+    pip3 install --no-cache-dir -r requirements.txt
+
+# Download SpaCy model
+RUN python3 -m spacy download en_core_web_sm
+
+# Create directories for models and data
+RUN mkdir -p /models /data /tmp/booknlp
+
+# Expose API port
+EXPOSE 8888
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8888/health || exit 1
+
+# Run the server
+CMD ["python3", "booknlp_server.py"]
