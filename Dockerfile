@@ -22,8 +22,9 @@ COPY booknlp_server.py /app/
 COPY requirements.txt /app/
 
 # Install Python dependencies
-RUN pip3 install --no-cache-dir --upgrade pip && \
-    pip3 install --no-cache-dir -r requirements.txt
+# --break-system-packages is safe in Docker containers (PEP 668)
+RUN pip3 install --no-cache-dir --upgrade pip --break-system-packages && \
+    pip3 install --no-cache-dir -r requirements.txt --break-system-packages
 
 # Download SpaCy model
 RUN python3 -m spacy download en_core_web_sm
