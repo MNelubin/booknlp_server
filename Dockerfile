@@ -1,11 +1,9 @@
 # Use PyTorch official image with CUDA support
+# This image already includes Python and PyTorch with CUDA
 FROM pytorch/pytorch:2.10.0-cuda13.0-cudnn9-runtime
 
-# Install system dependencies
+# Install additional system dependencies (Python is already installed)
 RUN apt-get update -qq && apt-get install -y -qq \
-    python3.11 \
-    python3.11-venv \
-    python3-pip \
     git \
     curl \
     wget \
