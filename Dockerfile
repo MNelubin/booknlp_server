@@ -1,4 +1,5 @@
-FROM nvidia/cuda:12.1.0-runtime-ubuntu22.04
+# Use PyTorch official image with CUDA support
+FROM pytorch/pytorch:2.5.1-cuda12.4-cudnn-runtime-ubuntu22.04
 
 # Install system dependencies
 RUN apt-get update -qq && apt-get install -y -qq \

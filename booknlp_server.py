@@ -2,6 +2,7 @@
 BookNLP GPU Service
 Runs on host with GPU, accepts API calls for text processing
 """
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from booknlp.booknlp import BookNLP
@@ -19,12 +20,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-app = FastAPI(
-    title="BookNLP GPU Service",
-    version="1.0.0",
-    description="GPU-accelerated BookNLP microservice"
-)
-
 # Configuration
 MODEL_SIZE = os.getenv("BOOKNLP_MODEL", "big")
 MODELS_DIR = os.getenv("BOOKNLP_MODELS_DIR", "/models")
@@ -33,6 +28,49 @@ API_PORT = int(os.getenv("API_PORT", "8888"))
 
 # Global BookNLP instance
 booknlp_model = None
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan context manager for startup/shutdown events"""
+    global booknlp_model
+
+    # Startup
+    logger.info(f"Initializing BookNLP {MODEL_SIZE} model on GPU...")
+    logger.info(f"Models directory: {MODELS_DIR}")
+    logger.info(f"Data directory: {DATA_DIR}")
+
+    # Ensure directories exist
+    Path(MODELS_DIR).mkdir(parents=True, exist_ok=True)
+    Path(DATA_DIR).mkdir(parents=True, exist_ok=True)
+
+    try:
+        model_params = {
+            "pipeline": "entity,quote,supersense,event,coref",
+            "model": MODEL_SIZE
+        }
+
+        booknlp_model = BookNLP("en", model_params)
+        logger.info("✓ BookNLP model loaded successfully!")
+        logger.info(f"✓ Model: {MODEL_SIZE}")
+        logger.info(f"✓ Pipeline: {model_params['pipeline']}")
+
+    except Exception as e:
+        logger.error(f"Failed to initialize BookNLP: {e}")
+        raise
+
+    yield
+
+    # Shutdown (cleanup if needed)
+    logger.info("Shutting down BookNLP GPU Service...")
+
+
+app = FastAPI(
+    title="BookNLP GPU Service",
+    version="1.0.0",
+    description="GPU-accelerated BookNLP microservice",
+    lifespan=lifespan
+)
 
 
 class ExtractionRequest(BaseModel):
@@ -57,35 +95,6 @@ class HealthResponse(BaseModel):
     cuda_available: Optional[bool] = None
     gpu_count: Optional[int] = None
     gpu_name: Optional[str] = None
-
-
-@app.on_event("startup")
-async def startup():
-    """Initialize BookNLP model on GPU"""
-    global booknlp_model
-
-    logger.info(f"Initializing BookNLP {MODEL_SIZE} model on GPU...")
-    logger.info(f"Models directory: {MODELS_DIR}")
-    logger.info(f"Data directory: {DATA_DIR}")
-
-    # Ensure directories exist
-    Path(MODELS_DIR).mkdir(parents=True, exist_ok=True)
-    Path(DATA_DIR).mkdir(parents=True, exist_ok=True)
-
-    try:
-        model_params = {
-            "pipeline": "entity,quote,supersense,event,coref",
-            "model": MODEL_SIZE
-        }
-
-        booknlp_model = BookNLP("en", model_params)
-        logger.info("✓ BookNLP model loaded successfully!")
-        logger.info(f"✓ Model: {MODEL_SIZE}")
-        logger.info(f"✓ Pipeline: {model_params['pipeline']}")
-
-    except Exception as e:
-        logger.error(f"Failed to initialize BookNLP: {e}")
-        raise
 
 
 @app.get("/", response_model=dict)
@@ -260,10 +269,13 @@ async def get_files(book_id: str):
 
 if __name__ == "__main__":
     import uvicorn
+    import asyncio
 
+    # Use standard asyncio instead of uvloop to avoid permission errors in containers
     uvicorn.run(
         app,
         host="0.0.0.0",
         port=API_PORT,
-        log_level="info"
+        log_level="info",
+        loop="asyncio"  # Use standard asyncio, not uvloop
     )
