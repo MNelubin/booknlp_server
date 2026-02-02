@@ -1,5 +1,5 @@
 # Use PyTorch official image with CUDA support and Python 3.11
-FROM pytorch/pytorch:2.5.1-cuda12.4-cudnn-runtime-ubuntu22.04
+FROM pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime
 
 # Install additional system dependencies (Python is already installed)
 RUN apt-get update -qq && apt-get install -y -qq \
