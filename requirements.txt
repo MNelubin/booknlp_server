@@ -1,4 +1,4 @@
-booknlp @ git+https://github.com/blueprintparadise/booknlp2.git@main#egg=booknlp
+booknlp2 @ git+https://github.com/blueprintparadise/booknlp2.git@main
 spacy>=3.0.0
 fastapi>=0.100.0
 uvicorn>=0.23.0
