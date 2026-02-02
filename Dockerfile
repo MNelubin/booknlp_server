@@ -3,10 +3,13 @@
 FROM pytorch/pytorch:2.10.0-cuda13.0-cudnn9-runtime
 
 # Install additional system dependencies (Python is already installed)
+# Rust is needed for building older tokenizers version
 RUN apt-get update -qq && apt-get install -y -qq \
     git \
     curl \
     wget \
+    cargo \
+    rustc \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
