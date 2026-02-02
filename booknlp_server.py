@@ -269,7 +269,6 @@ async def get_files(book_id: str):
 
 if __name__ == "__main__":
     import uvicorn
-    import asyncio
 
     # Use standard asyncio instead of uvloop to avoid permission errors in containers
     uvicorn.run(
@@ -277,5 +276,7 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=API_PORT,
         log_level="info",
-        loop="asyncio"  # Use standard asyncio, not uvloop
+        loop="asyncio",  # Use standard asyncio, not uvloop
+        access_log=True,
+        use_colors=False
     )

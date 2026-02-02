@@ -41,6 +41,10 @@ services:
               count: all
               capabilities: [gpu]
 
+    # Security options for asyncio socketpair in containers
+    security_opt:
+      - seccomp:unconfined
+
     ports:
       - "${API_PORT:-8888}:8888"
 
