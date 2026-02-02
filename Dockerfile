@@ -27,7 +27,7 @@ RUN pip3 install --no-cache-dir --upgrade pip --break-system-packages && \
     pip3 install --no-cache-dir -r requirements.txt --break-system-packages
 
 # Download SpaCy model
-RUN python3 -m spacy download en_core_web_sm
+RUN python3 -m spacy download en_core_web_sm --break-system-packages
 
 # Create directories for models and data
 RUN mkdir -p /models /data /tmp/booknlp
