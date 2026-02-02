@@ -1,5 +1,5 @@
 # Use PyTorch official image with CUDA support and Python 3.11
-FROM pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime
+FROM pytorch/pytorch:2.6.0-cuda12.4-cudnn9-runtime
 
 # Install additional system dependencies (Python is already installed)
 RUN apt-get update -qq && apt-get install -y -qq \
@@ -29,14 +29,14 @@ RUN pip3 install --no-cache-dir --upgrade pip --break-system-packages && \
 RUN python3 -m spacy download en_core_web_sm --break-system-packages
 
 # Create directories for models and data
-RUN mkdir -p /models /data /tmp/booknlp
+RUN mkdir -p /models /data /tmp/booknlp /models/.cache/transformers /models/.cache/datasets
 
 # Expose API port
-EXPOSE 8888
+EXPOSE 9999
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:8888/health || exit 1
+    CMD curl -f http://localhost:9999/health || exit 1
 
 # Run the server
 CMD ["python3", "booknlp_server.py"]
