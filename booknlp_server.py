@@ -2,6 +2,20 @@
 BookNLP GPU Service
 Runs on host with GPU, accepts API calls for text processing
 """
+# Monkey patch torch.load to remove position_ids from state_dict
+# This fixes compatibility with transformers 4.x+
+import torch
+_original_torch_load = torch.load
+
+def patched_torch_load(f, *args, **kwargs):
+    result = _original_torch_load(f, *args, **kwargs)
+    # Remove position_ids if present (for transformers 4.x+ compatibility)
+    if isinstance(result, dict) and "bert.embeddings.position_ids" in result:
+        del result["bert.embeddings.position_ids"]
+    return result
+
+torch.load = patched_torch_load
+
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
