@@ -42,6 +42,8 @@ services:
               capabilities: [gpu]
 
     # Security options for asyncio socketpair in containers
+    # privileged mode is needed for Docker-in-LXC (Proxmox)
+    privileged: true
     security_opt:
       - seccomp:unconfined
 
