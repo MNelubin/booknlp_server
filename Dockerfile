@@ -1,6 +1,5 @@
-# Use PyTorch official image with CUDA support
-# This image already includes Python and PyTorch with CUDA
-FROM pytorch/pytorch:2.10.0-cuda13.0-cudnn9-runtime
+# Use PyTorch official image with CUDA support and Python 3.11
+FROM pytorch/pytorch:2.5.1-cuda12.4-cudnn-runtime-ubuntu22.04
 
 # Install additional system dependencies (Python is already installed)
 RUN apt-get update -qq && apt-get install -y -qq \
@@ -23,9 +22,7 @@ COPY requirements.txt /app/
 
 # Install Python dependencies
 # --break-system-packages is safe in Docker containers (PEP 668)
-# Install tokenizers with prebuilt wheel first to avoid Rust compilation
 RUN pip3 install --no-cache-dir --upgrade pip --break-system-packages && \
-    pip3 install --no-cache-dir tokenizers==0.10.3 --break-system-packages && \
     pip3 install --no-cache-dir -r requirements.txt --break-system-packages
 
 # Download SpaCy model
