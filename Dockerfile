@@ -25,11 +25,6 @@ COPY requirements.txt /app/
 RUN pip3 install --no-cache-dir --upgrade pip --break-system-packages && \
     pip3 install --no-cache-dir -r requirements.txt --break-system-packages
 
-# Apply position_ids patch for transformers 4.x+ compatibility
-COPY patch_booknlp.py /tmp/patch_booknlp.py
-RUN python3 /tmp/patch_booknlp.py && \
-    python3 -c "import booknlp; print(booknlp.__path__[0])"
-
 # Download SpaCy model
 RUN python3 -m spacy download en_core_web_sm --break-system-packages
 

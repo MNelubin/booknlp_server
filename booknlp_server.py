@@ -2,6 +2,34 @@
 BookNLP GPU Service
 Runs on host with GPU, accepts API calls for text processing
 """
+# Patch BookNLP for transformers 4.x+ compatibility BEFORE importing
+import sys
+import re
+try:
+    import booknlp
+    entity_tagger_path = f"{booknlp.__path__[0]}/english/entity_tagger.py"
+    with open(entity_tagger_path, 'r') as f:
+        content = f.read()
+
+    # Check if patch is already applied
+    if 'bert.embeddings.position_ids' not in content:
+        old_code = r'self\.model\.load_state_dict\(torch\.load\(model_file, map_location=device\)\)'
+        new_code = '''state_dict = torch.load(model_file, map_location=device)
+        if "bert.embeddings.position_ids" in state_dict:
+            del state_dict["bert.embeddings.position_ids"]
+        self.model.load_state_dict(state_dict)'''
+
+        new_content = re.sub(old_code, new_code, content)
+        if new_content != content:
+            with open(entity_tagger_path, 'w') as f:
+                f.write(new_content)
+            print("✓ BookNLP patched for transformers 4.x+ compatibility")
+            # Clear import cache
+            import importlib
+            importlib.invalidate_caches()
+except Exception as e:
+    print(f"Warning: Could not patch BookNLP: {e}")
+
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
