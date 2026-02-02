@@ -3,9 +3,24 @@ BookNLP GPU Service
 Runs on host with GPU, accepts API calls for text processing
 """
 # Patch BookNLP for transformers 4.x+ compatibility BEFORE importing
+# Also fix TabError from previous bad sed patches
 import sys
-import re
+import subprocess
+
 try:
+    # Fix TabError by reinstalling booknlp to restore original files
+    entity_tagger_path = "/opt/conda/lib/python3.11/site-packages/booknlp/english/entity_tagger.py"
+    try:
+        # Check if file has TabError
+        with open(entity_tagger_path, 'r') as f:
+            content = f.read()
+        compile(content, entity_tagger_path, 'exec')
+    except (TabError, IndentationError):
+        print("Detected corrupted entity_tagger.py, reinstalling booknlp...")
+        subprocess.run([sys.executable, "-m", "pip", "install", "--force-reinstall", "--no-deps", "booknlp==1.0.8", "--break-system-packages"],
+                       capture_output=True)
+
+    import re
     import booknlp
     entity_tagger_path = f"{booknlp.__path__[0]}/english/entity_tagger.py"
     with open(entity_tagger_path, 'r') as f:
