@@ -1,8 +1,8 @@
-booknlp>=0.0.0
+booknlp @ git+https://github.com/blueprintparadise/booknlp2.git@main#egg=booknlp
 spacy>=3.0.0
 fastapi>=0.100.0
 uvicorn>=0.23.0
 torch>=2.0.0
-transformers==4.30.0
+transformers>=4.30.0
 requests>=2.31.0
 pydantic>=2.0.0
