@@ -3,6 +3,7 @@
 FROM pytorch/pytorch:2.10.0-cuda13.0-cudnn9-runtime
 
 # Install additional system dependencies (Python is already installed)
+# Install Rust via rustup for building tokenizers
 RUN apt-get update -qq && apt-get install -y -qq \
     git \
     curl \
@@ -10,10 +11,15 @@ RUN apt-get update -qq && apt-get install -y -qq \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
-# Set Python environment
+# Install latest Rust for building tokenizers (older Rust doesn't support edition2024)
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && \
+    PATH="/root/.cargo/bin:${PATH}"
+
+# Set Python and Rust environment
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONPATH=/app
+    PYTHONPATH=/app \
+    PATH="/root/.cargo/bin:${PATH}"
 
 WORKDIR /app
 
