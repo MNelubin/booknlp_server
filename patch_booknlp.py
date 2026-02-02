@@ -3,8 +3,18 @@
 Patch BookNLP to fix position_ids compatibility with transformers 4.x+
 """
 import re
+import sys
 
-file_path = "/opt/conda/lib/python3.11/site-packages/booknlp/english/entity_tagger.py"
+# Find the correct path
+try:
+    import booknlp
+    module_path = booknlp.__path__[0]
+    file_path = f"{module_path}/english/entity_tagger.py"
+except ImportError:
+    print("BookNLP not found, skipping patch")
+    sys.exit(0)
+
+print(f"Patching: {file_path}")
 
 with open(file_path, 'r') as f:
     content = f.read()
@@ -16,9 +26,11 @@ new_code = '''state_dict = torch.load(model_file, map_location=device)
             del state_dict["bert.embeddings.position_ids"]
         self.model.load_state_dict(state_dict)'''
 
-content = re.sub(old_code, new_code, content)
+new_content = re.sub(old_code, new_code, content)
 
-with open(file_path, 'w') as f:
-    f.write(content)
-
-print("✓ BookNLP patched for transformers 4.x+ compatibility")
+if new_content == content:
+    print("Warning: Pattern not found, patch may already be applied")
+else:
+    with open(file_path, 'w') as f:
+        f.write(new_content)
+    print("✓ BookNLP patched for transformers 4.x+ compatibility")
