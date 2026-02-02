@@ -5,7 +5,7 @@ Runs on host with GPU, accepts API calls for text processing
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from booknlp2.booknlp import BookNLP
+from booknlp.booknlp import BookNLP
 import os
 import tempfile
 import shutil
