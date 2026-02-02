@@ -26,8 +26,8 @@ RUN pip3 install --no-cache-dir --upgrade pip --break-system-packages && \
     pip3 install --no-cache-dir -r requirements.txt --break-system-packages
 
 # Apply position_ids patch for transformers 4.x+ compatibility
-# This fixes "Unexpected key(s) in state_dict: bert.embeddings.position_ids"
-RUN sed -i 's/self.model.load_state_dict(torch.load(model_file, map_location=device))/state_dict = torch.load(model_file, map_location=device)\n        if "bert.embeddings.position_ids" in state_dict:\n            del state_dict["bert.embeddings.position_ids"]\n        self.model.load_state_dict(state_dict)/g' /opt/conda/lib/python3.11/site-packages/booknlp/english/entity_tagger.py
+COPY patch_booknlp.py /tmp/patch_booknlp.py
+RUN python3 /tmp/patch_booknlp.py
 
 # Download SpaCy model
 RUN python3 -m spacy download en_core_web_sm --break-system-packages
