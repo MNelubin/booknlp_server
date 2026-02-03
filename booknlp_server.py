@@ -42,6 +42,7 @@ MODELS_DIR = os.getenv("BOOKNLP_MODELS_DIR", "/models")
 DATA_DIR = os.getenv("BOOKNLP_DATA_DIR", "/data")
 API_PORT = int(os.getenv("API_PORT", "8888"))
 MODEL_IDLE_TIMEOUT = int(os.getenv("MODEL_IDLE_TIMEOUT", "300"))  # 5 minutes default
+MODEL_WARMUP = os.getenv("MODEL_WARMUP", "true").lower() == "true"  # Warmup on startup
 
 # Global BookNLP instance and state
 booknlp_model: Optional[BookNLP] = None
@@ -57,10 +58,26 @@ def _load_model() -> None:
 
     with _model_lock:
         if _model_loaded:
+            logger.debug("Model already loaded, skipping")
             return
 
+        logger.info("=" * 60)
         logger.info(f"Loading BookNLP {MODEL_SIZE} model on GPU...")
+        logger.info("=" * 60)
         logger.info(f"Models directory: {MODELS_DIR}")
+        logger.info(f"Model size: {MODEL_SIZE}")
+
+        # Check CUDA availability
+        try:
+            import torch
+            logger.info(f"CUDA available: {torch.cuda.is_available()}")
+            if torch.cuda.is_available():
+                logger.info(f"CUDA device count: {torch.cuda.device_count()}")
+                logger.info(f"CUDA device name: {torch.cuda.get_device_name(0)}")
+                logger.info(f"CUDA memory allocated: {torch.cuda.memory_allocated(0) / 1024**3:.2f} GB")
+                logger.info(f"CUDA memory reserved: {torch.cuda.memory_reserved(0) / 1024**3:.2f} GB")
+        except Exception as e:
+            logger.warning(f"Could not check CUDA status: {e}")
 
         try:
             model_params = {
@@ -68,14 +85,42 @@ def _load_model() -> None:
                 "model": MODEL_SIZE
             }
 
+            logger.info(f"Initializing BookNLP with params: {model_params}")
+            logger.info("This may take a while on first run (downloading models)...")
+
+            import time
+            start_time = time.time()
+
             booknlp_model = BookNLP("en", model_params)
+
+            load_time = time.time() - start_time
             _model_loaded = True
+
+            logger.info("=" * 60)
             logger.info("✓ BookNLP model loaded successfully!")
             logger.info(f"✓ Model: {MODEL_SIZE}")
             logger.info(f"✓ Pipeline: {model_params['pipeline']}")
+            logger.info(f"✓ Load time: {load_time:.2f} seconds")
+
+            # Report memory usage after loading
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    logger.info(f"✓ GPU memory allocated: {torch.cuda.memory_allocated(0) / 1024**3:.2f} GB")
+                    logger.info(f"✓ GPU memory reserved: {torch.cuda.memory_reserved(0) / 1024**3:.2f} GB")
+            except Exception as e:
+                logger.warning(f"Could not check GPU memory: {e}")
+
+            logger.info("=" * 60)
 
         except Exception as e:
-            logger.error(f"Failed to load BookNLP model: {e}")
+            logger.error("=" * 60)
+            logger.error(f"✗ Failed to load BookNLP model!")
+            logger.error(f"✗ Error: {e}")
+            logger.error(f"✗ Error type: {type(e).__name__}")
+            import traceback
+            logger.error(f"✗ Traceback:\n{traceback.format_exc()}")
+            logger.error("=" * 60)
             raise
 
 
@@ -171,21 +216,56 @@ def _update_activity() -> None:
 async def lifespan(app: FastAPI):
     """Lifespan context manager for startup/shutdown events"""
     # Startup
+    logger.info("")
+    logger.info("=" * 60)
     logger.info("Starting BookNLP GPU Service...")
+    logger.info("=" * 60)
     logger.info(f"Models directory: {MODELS_DIR}")
     logger.info(f"Data directory: {DATA_DIR}")
     logger.info(f"Model idle timeout: {MODEL_IDLE_TIMEOUT} seconds")
-    logger.info("Model will be loaded on first request (lazy loading)")
+    logger.info(f"Model warmup on startup: {MODEL_WARMUP}")
 
     # Ensure directories exist
     Path(MODELS_DIR).mkdir(parents=True, exist_ok=True)
     Path(DATA_DIR).mkdir(parents=True, exist_ok=True)
 
+    # Warmup: load model once to cache models, then unload
+    if MODEL_WARMUP:
+        logger.info("")
+        logger.info("🔥 Warming up: loading model to cache...")
+        logger.info("This will download models on first run and cache them.")
+        logger.info("After caching, model will be unloaded to free GPU memory.")
+        logger.info("")
+
+        try:
+            _load_model()
+            logger.info("✓ Model warmup completed successfully!")
+
+            # Immediately unload to free memory
+            logger.info("")
+            logger.info("Unloading model after warmup to free GPU memory...")
+            _unload_model()
+            logger.info("✓ Model unloaded. Ready for lazy loading on first request.")
+            logger.info("")
+
+        except Exception as e:
+            logger.error(f"✗ Model warmup failed: {e}")
+            logger.error("Service will start anyway, model will load on first request.")
+    else:
+        logger.info("Model warmup disabled. Model will load on first request.")
+
+    logger.info("=" * 60)
+    logger.info("✓ BookNLP GPU Service is ready!")
+    logger.info("=" * 60)
+    logger.info("")
+
     yield
 
     # Shutdown
+    logger.info("")
     logger.info("Shutting down BookNLP GPU Service...")
     _unload_model()
+    logger.info("Shutdown complete.")
 
 
 app = FastAPI(
