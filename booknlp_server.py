@@ -26,6 +26,8 @@ import shutil
 from typing import Optional
 import logging
 from pathlib import Path
+import asyncio
+from threading import Lock
 
 # Configure logging
 logging.basicConfig(
@@ -39,44 +41,151 @@ MODEL_SIZE = os.getenv("BOOKNLP_MODEL", "big")
 MODELS_DIR = os.getenv("BOOKNLP_MODELS_DIR", "/models")
 DATA_DIR = os.getenv("BOOKNLP_DATA_DIR", "/data")
 API_PORT = int(os.getenv("API_PORT", "8888"))
+MODEL_IDLE_TIMEOUT = int(os.getenv("MODEL_IDLE_TIMEOUT", "300"))  # 5 minutes default
 
-# Global BookNLP instance
-booknlp_model = None
+# Global BookNLP instance and state
+booknlp_model: Optional[BookNLP] = None
+_model_lock = Lock()
+_last_activity_time: Optional[float] = None
+_unload_task: Optional[asyncio.Task] = None
+_model_loaded = False
+
+
+def _load_model() -> None:
+    """Load BookNLP model (thread-safe)"""
+    global booknlp_model, _model_loaded
+
+    with _model_lock:
+        if _model_loaded:
+            return
+
+        logger.info(f"Loading BookNLP {MODEL_SIZE} model on GPU...")
+        logger.info(f"Models directory: {MODELS_DIR}")
+
+        try:
+            model_params = {
+                "pipeline": "entity,quote,supersense,event,coref",
+                "model": MODEL_SIZE
+            }
+
+            booknlp_model = BookNLP("en", model_params)
+            _model_loaded = True
+            logger.info("✓ BookNLP model loaded successfully!")
+            logger.info(f"✓ Model: {MODEL_SIZE}")
+            logger.info(f"✓ Pipeline: {model_params['pipeline']}")
+
+        except Exception as e:
+            logger.error(f"Failed to load BookNLP model: {e}")
+            raise
+
+
+def _unload_model() -> None:
+    """Unload BookNLP model to free memory (thread-safe)"""
+    global booknlp_model, _model_loaded, _last_activity_time, _unload_task
+
+    with _model_lock:
+        if not _model_loaded:
+            return
+
+        logger.info("Unloading BookNLP model to free memory...")
+
+        try:
+            # Delete the model instance
+            del booknlp_model
+            booknlp_model = None
+            _model_loaded = False
+            _last_activity_time = None
+            _unload_task = None
+
+            # Force garbage collection
+            import gc
+            gc.collect()
+
+            # Clear CUDA cache if available
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    logger.info("✓ CUDA cache cleared")
+            except ImportError:
+                pass
+
+            logger.info("✓ Model unloaded successfully")
+
+        except Exception as e:
+            logger.error(f"Error unloading model: {e}")
+
+
+async def _schedule_model_unload() -> None:
+    """Schedule model unload after timeout period"""
+    global _unload_task
+
+    # Cancel existing task if any
+    if _unload_task and not _unload_task.done():
+        _unload_task.cancel()
+
+    # Create new unload task
+    _unload_task = asyncio.create_task(_model_unload_worker())
+
+
+async def _model_unload_worker() -> None:
+    """Worker task that unloads model after idle timeout"""
+    global _last_activity_time
+
+    try:
+        logger.info(f"Model unload scheduled in {MODEL_IDLE_TIMEOUT} seconds...")
+        await asyncio.sleep(MODEL_IDLE_TIMEOUT)
+
+        # Check if there was any activity during sleep
+        import time
+        current_time = time.time()
+        if _last_activity_time and (current_time - _last_activity_time) >= MODEL_IDLE_TIMEOUT:
+            logger.info(f"No activity for {MODEL_IDLE_TIMEOUT} seconds, unloading model...")
+            _unload_model()
+        else:
+            logger.debug("Activity detected, cancelling model unload")
+
+    except asyncio.CancelledError:
+        logger.debug("Model unload task cancelled")
+        raise
+
+
+def _update_activity() -> None:
+    """Update last activity timestamp and schedule model unload"""
+    global _last_activity_time
+
+    import time
+    _last_activity_time = time.time()
+
+    # Schedule unload task in background
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.create_task(_schedule_model_unload())
+    except RuntimeError:
+        # No event loop running (shouldn't happen in FastAPI)
+        pass
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager for startup/shutdown events"""
-    global booknlp_model
-
     # Startup
-    logger.info(f"Initializing BookNLP {MODEL_SIZE} model on GPU...")
+    logger.info("Starting BookNLP GPU Service...")
     logger.info(f"Models directory: {MODELS_DIR}")
     logger.info(f"Data directory: {DATA_DIR}")
+    logger.info(f"Model idle timeout: {MODEL_IDLE_TIMEOUT} seconds")
+    logger.info("Model will be loaded on first request (lazy loading)")
 
     # Ensure directories exist
     Path(MODELS_DIR).mkdir(parents=True, exist_ok=True)
     Path(DATA_DIR).mkdir(parents=True, exist_ok=True)
 
-    try:
-        model_params = {
-            "pipeline": "entity,quote,supersense,event,coref",
-            "model": MODEL_SIZE
-        }
-
-        booknlp_model = BookNLP("en", model_params)
-        logger.info("✓ BookNLP model loaded successfully!")
-        logger.info(f"✓ Model: {MODEL_SIZE}")
-        logger.info(f"✓ Pipeline: {model_params['pipeline']}")
-
-    except Exception as e:
-        logger.error(f"Failed to initialize BookNLP: {e}")
-        raise
-
     yield
 
-    # Shutdown (cleanup if needed)
+    # Shutdown
     logger.info("Shutting down BookNLP GPU Service...")
+    _unload_model()
 
 
 app = FastAPI(
@@ -106,9 +215,12 @@ class HealthResponse(BaseModel):
     service: str
     model: str
     gpu_enabled: bool
+    model_loaded: bool = False
     cuda_available: Optional[bool] = None
     gpu_count: Optional[int] = None
     gpu_name: Optional[str] = None
+    gpu_memory_used_mb: Optional[float] = None
+    gpu_memory_cached_mb: Optional[float] = None
 
 
 @app.get("/", response_model=dict)
@@ -116,10 +228,13 @@ async def root():
     """Service information"""
     return {
         "service": "BookNLP GPU Service",
-        "version": "1.0.0",
+        "version": "1.1.0",
         "model": MODEL_SIZE,
         "status": "ready",
         "gpu": True,
+        "lazy_loading": True,
+        "idle_timeout_seconds": MODEL_IDLE_TIMEOUT,
+        "model_loaded": _model_loaded,
         "endpoints": {
             "health": "/health",
             "extract": "/extract",
@@ -131,12 +246,13 @@ async def root():
 
 @app.get("/health", response_model=HealthResponse)
 async def health():
-    """Health check with GPU status"""
+    """Health check with GPU status and model state"""
     gpu_info = {
         "status": "healthy",
         "service": "BookNLP GPU Service",
         "model": MODEL_SIZE,
-        "gpu_enabled": True
+        "gpu_enabled": True,
+        "model_loaded": _model_loaded
     }
 
     try:
@@ -145,6 +261,10 @@ async def health():
         gpu_info["gpu_count"] = torch.cuda.device_count()
         if torch.cuda.is_available():
             gpu_info["gpu_name"] = torch.cuda.get_device_name(0)
+            if _model_loaded:
+                # Get memory usage if model is loaded
+                gpu_info["gpu_memory_used_mb"] = torch.cuda.memory_allocated(0) / 1024 / 1024
+                gpu_info["gpu_memory_cached_mb"] = torch.cuda.memory_reserved(0) / 1024 / 1024
     except ImportError:
         gpu_info["cuda_available"] = False
         logger.warning("PyTorch not available for GPU check")
@@ -163,8 +283,15 @@ async def extract(request: ExtractionRequest):
     Returns:
         ExtractionResponse with status and output directory
     """
-    if not booknlp_model:
+    # Load model if not loaded (lazy loading)
+    if not _model_loaded:
+        logger.info("Model not loaded, loading now...")
+        _load_model()
+    elif not booknlp_model:
         raise HTTPException(status_code=503, detail="Model not loaded")
+
+    # Update activity and schedule unload
+    _update_activity()
 
     logger.info(f"Processing book_id: {request.book_id}")
     logger.info(f"Text length: {len(request.text)} characters")
@@ -220,8 +347,15 @@ async def extract_file(file_path: str, book_id: str = "book"):
     Returns:
         ExtractionResponse with status and output directory
     """
-    if not booknlp_model:
+    # Load model if not loaded (lazy loading)
+    if not _model_loaded:
+        logger.info("Model not loaded, loading now...")
+        _load_model()
+    elif not booknlp_model:
         raise HTTPException(status_code=503, detail="Model not loaded")
+
+    # Update activity and schedule unload
+    _update_activity()
 
     file_path_obj = Path(file_path)
 
@@ -279,6 +413,42 @@ async def get_files(book_id: str):
     ]
 
     return {"book_id": book_id, "files": files}
+
+
+@app.post("/model/load")
+async def load_model():
+    """
+    Manually load the BookNLP model
+
+    Returns:
+        Status message
+    """
+    if _model_loaded:
+        return {"status": "already_loaded", "message": "Model is already loaded"}
+
+    try:
+        _load_model()
+        return {"status": "loaded", "message": "Model loaded successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/model/unload")
+async def unload_model():
+    """
+    Manually unload the BookNLP model to free GPU memory
+
+    Returns:
+        Status message
+    """
+    if not _model_loaded:
+        return {"status": "not_loaded", "message": "Model is not loaded"}
+
+    try:
+        _unload_model()
+        return {"status": "unloaded", "message": "Model unloaded successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":
