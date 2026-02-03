@@ -5,7 +5,7 @@
 set -e
 
 # Configuration
-BASE_URL="${BOOKNLP_SERVICE_URL:-http://localhost:8888}"
+BASE_URL="${BOOKNLP_SERVICE_URL:-http://localhost:9999}"
 TEXT="Frodo Baggins was a hobbit who lived in the Shire. He had a friend named Samwise Gamgee."
 BOOK_ID="test_$(date +%s)"
 

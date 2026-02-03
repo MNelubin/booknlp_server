@@ -2,7 +2,7 @@
 # Quick health check for BookNLP GPU Service
 # Fast check without running extraction
 
-BASE_URL="${BOOKNLP_SERVICE_URL:-http://localhost:8888}"
+BASE_URL="${BOOKNLP_SERVICE_URL:-http://localhost:9999}"
 
 # Colors
 RED='\033[0;31m'
