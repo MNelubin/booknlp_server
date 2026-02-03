@@ -13,6 +13,8 @@ booknlp-gateway/
 ├── docker-compose.yml      # Docker конфигурация
 ├── Dockerfile              # Образ контейнера
 ├── booknlp_server.py       # FastAPI сервер
+├── test_service.sh         # Полный тест сервиса
+├── quick_check.sh          # Быстрая проверка
 ├── .env.example            # Пример конфигурации
 ├── .gitignore
 └── README.md
@@ -38,9 +40,20 @@ docker compose up -d
 
 ### 3. Проверка
 
+**Быстрая проверка:**
+```bash
+./quick_check.sh
+```
+
+**Полный тест:**
+```bash
+./test_service.sh
+```
+
+**Или вручную:**
 ```bash
 # Health check
-curl http://localhost:8888/health
+curl http://localhost:8888/health | jq '.'
 
 # Должен вернуть информацию о GPU
 ```
