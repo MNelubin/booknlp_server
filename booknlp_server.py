@@ -137,23 +137,52 @@ def _unload_model() -> None:
         logger.info("Unloading BookNLP model to free memory...")
 
         try:
-            # Delete the model instance
+            # Explicitly delete all submodels before deleting main model
+            # BookNLP has multiple submodels that remain in memory
+            if booknlp_model and hasattr(booknlp_model, 'booknlp'):
+                bnlp = booknlp_model.booknlp
+
+                # Delete each submodel explicitly to free GPU memory
+                submodels = [
+                    'entityTagger',      # LitBankEntityTagger with BERT
+                    'quote_attrib',      # QuotationAttribution with BERT
+                    'litbank_coref',     # LitBankCoref with BERT
+                    'tagger',            # SpacyPipeline
+                    'quoteTagger',       # QuoteTagger
+                    'name_resolver',     # NameCoref
+                ]
+
+                for attr in submodels:
+                    if hasattr(bnlp, attr):
+                        try:
+                            submodel = getattr(bnlp, attr)
+                            # Delete the model if it has one
+                            if hasattr(submodel, 'model'):
+                                del submodel.model
+                            delattr(bnlp, attr)
+                            logger.debug(f"✓ Deleted {attr}")
+                        except Exception as e:
+                            logger.debug(f"Warning deleting {attr}: {e}")
+
+            # Delete the main model instance
             del booknlp_model
             booknlp_model = None
             _model_loaded = False
             _last_activity_time = None
             _unload_task = None
 
-            # Force garbage collection
+            # Force garbage collection multiple times to ensure cleanup
             import gc
             gc.collect()
+            gc.collect()  # Second pass for circular references
 
             # Clear CUDA cache if available
             try:
                 import torch
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
-                    logger.info("✓ CUDA cache cleared")
+                    torch.cuda.ipc_collect()  # Clear IPC memory
+                    logger.info("✓ CUDA cache and IPC cleared")
             except ImportError:
                 pass
 
@@ -321,6 +350,12 @@ async def root():
             "health": "/health",
             "extract": "/extract",
             "extract_file": "/extract_file",
+            "upload_and_extract": "/upload_and_extract",
+            "files": "/files/{book_id}",
+            "download": "/download/{book_id}/{filename}",
+            "model_load": "/model/load",
+            "model_unload": "/model/unload",
+            "model_memory": "/model/memory",
             "docs": "/docs"
         }
     }
@@ -648,6 +683,52 @@ async def load_model():
         return {"status": "loaded", "message": "Model loaded successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/model/memory")
+async def get_memory_info():
+    """
+    Get detailed GPU memory usage information
+
+    Returns:
+        Dictionary with detailed memory statistics
+    """
+    memory_info = {
+        "model_loaded": _model_loaded,
+        "gpu_available": False,
+        "devices": []
+    }
+
+    try:
+        import torch
+        if torch.cuda.is_available():
+            memory_info["gpu_available"] = True
+            device_count = torch.cuda.device_count()
+
+            for i in range(device_count):
+                device_info = {
+                    "device_id": i,
+                    "name": torch.cuda.get_device_name(i),
+                    "memory_allocated_mb": torch.cuda.memory_allocated(i) / 1024 / 1024,
+                    "memory_reserved_mb": torch.cuda.memory_reserved(i) / 1024 / 1024,
+                    "memory_free_mb": (torch.cuda.get_device_properties(i).total_memory -
+                                     torch.cuda.memory_reserved(i)) / 1024 / 1024,
+                    "memory_total_mb": torch.cuda.get_device_properties(i).total_memory / 1024 / 1024,
+                }
+                memory_info["devices"].append(device_info)
+
+            # Add BookNLP submodel info if loaded
+            if _model_loaded and booknlp_model and hasattr(booknlp_model, 'booknlp'):
+                bnlp = booknlp_model.booknlp
+                memory_info["submodels"] = {}
+                for attr in ['entityTagger', 'quote_attrib', 'litbank_coref', 'tagger', 'quoteTagger']:
+                    if hasattr(bnlp, attr):
+                        memory_info["submodels"][attr] = "loaded"
+
+    except ImportError:
+        memory_info["error"] = "PyTorch not available"
+
+    return memory_info
 
 
 @app.post("/model/unload")
