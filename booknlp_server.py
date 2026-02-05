@@ -83,7 +83,8 @@ def _load_model() -> None:
         try:
             model_params = {
                 "pipeline": "entity,quote,supersense,event,coref",
-                "model": MODEL_SIZE
+                "model": MODEL_SIZE,
+                "model_path": MODELS_DIR  # Explicitly set model path to use mounted volume
             }
 
             logger.info(f"Initializing BookNLP with params: {model_params}")

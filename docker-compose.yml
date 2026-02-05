@@ -38,6 +38,10 @@ services:
       # Mount temp directory for temporary files
       - ${TEMP_PATH:-./temp}:/tmp/booknlp
 
+      # Mount root home directory where BookNLP stores models by default
+      # BookNLP saves models to ~/booknlp_models which is /root/booknlp_models in container
+      - ${MODELS_PATH:-./models}:/root/booknlp_models
+
     deploy:
       resources:
         reservations:
