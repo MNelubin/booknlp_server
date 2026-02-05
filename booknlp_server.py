@@ -17,7 +17,8 @@ def patched_torch_load(f, *args, **kwargs):
 torch.load = patched_torch_load
 
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from booknlp.booknlp import BookNLP
 import os
@@ -466,6 +467,112 @@ async def extract_file(file_path: str, book_id: str = "book"):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/upload_and_extract")
+async def upload_and_extract(
+    file: UploadFile = File(..., description="Text file to process"),
+    book_id: str = Form(default="uploaded_book", description="Unique identifier for this book"),
+    pipeline: str = Form(default="entity,quote,supersense,event,coref", description="BookNLP pipeline"),
+    include_results: bool = Form(default=False, description="Include file contents in response")
+):
+    """
+    Upload a text file and extract entities in one request.
+
+    This endpoint accepts a file upload via multipart/form-data, processes it
+    through BookNLP, and returns the results.
+
+    Args:
+        file: Text file to process (supports large files)
+        book_id: Unique identifier for this book
+        pipeline: BookNLP pipeline components (comma-separated)
+        include_results: If True, include file contents in response
+
+    Returns:
+        Dictionary with status, file list, and optional file contents
+    """
+    # Load model if not loaded (lazy loading)
+    if not _model_loaded:
+        logger.info("Model not loaded, loading now...")
+        _load_model()
+    elif not booknlp_model:
+        raise HTTPException(status_code=503, detail="Model not loaded")
+
+    # Update activity and schedule unload
+    _update_activity()
+
+    logger.info(f"Received file upload: {file.filename} (book_id: {book_id})")
+
+    # Create output directory
+    output_dir = Path(DATA_DIR) / f"booknlp_{book_id}"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Save uploaded file to temporary location
+    temp_input_file = None
+    try:
+        # Read uploaded file
+        content = await file.read()
+
+        logger.info(f"File size: {len(content)} bytes")
+
+        # Write to temporary file
+        with tempfile.NamedTemporaryFile(mode='wb', delete=False, suffix='.txt') as f:
+            f.write(content)
+            temp_input_file = f.name
+
+        # Run BookNLP
+        logger.info(f"Running BookNLP {MODEL_SIZE} model...")
+        booknlp_model.process(temp_input_file, str(output_dir), book_id)
+
+        # List generated files
+        output_files = []
+        for f in output_dir.iterdir():
+            if f.is_file():
+                output_files.append({
+                    "name": f.name,
+                    "size": f.stat().st_size,
+                    "path": str(f)
+                })
+
+        logger.info(f"✓ Extraction completed. Generated {len(output_files)} files")
+
+        # Build response
+        result = {
+            "status": "success",
+            "book_id": book_id,
+            "message": f"Processed {file.filename} ({len(content)} chars)",
+            "files": output_files
+        }
+
+        # Optionally include file contents
+        if include_results:
+            result["contents"] = {}
+            for file_info in output_files:
+                file_path = Path(file_info["path"])
+                try:
+                    # Try to read as text, fall back to binary for large files
+                    if file_info["size"] < 10_000_000:  # 10MB limit for inline content
+                        result["contents"][file_info["name"]] = file_path.read_text(encoding='utf-8', errors='replace')
+                    else:
+                        result["contents"][file_info["name"]] = f"[File too large: {file_info['size']} bytes]"
+                except Exception as e:
+                    logger.warning(f"Could not read {file_info['name']}: {e}")
+                    result["contents"][file_info["name"]] = f"[Error reading file: {e}]"
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Error during upload and extraction: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        # Cleanup on error
+        shutil.rmtree(output_dir, ignore_errors=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+    finally:
+        # Cleanup input file
+        if temp_input_file and os.path.exists(temp_input_file):
+            os.unlink(temp_input_file)
+
+
 @app.get("/files/{book_id}")
 async def get_files(book_id: str):
     """
@@ -493,6 +600,35 @@ async def get_files(book_id: str):
     ]
 
     return {"book_id": book_id, "files": files}
+
+
+@app.get("/download/{book_id}/{filename}")
+async def download_file(book_id: str, filename: str):
+    """
+    Download a specific result file
+
+    Args:
+        book_id: Book identifier
+        filename: Name of the file to download
+
+    Returns:
+        File content as FileResponse
+    """
+    output_dir = Path(DATA_DIR) / f"booknlp_{book_id}"
+
+    if not output_dir.exists():
+        raise HTTPException(status_code=404, detail=f"No results found for book_id: {book_id}")
+
+    file_path = output_dir / filename
+
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=404, detail=f"File not found: {filename}")
+
+    return FileResponse(
+        path=file_path,
+        filename=filename,
+        media_type='text/plain'
+    )
 
 
 @app.post("/model/load")
